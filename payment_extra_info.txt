@@ -1,0 +1,103 @@
+<?php
+$setTransactionSoapDataArray = array();
+$setTransactionSoapDataArray['TransactionType'] = payuRedirectPaymentPage_transactionType;
+
+$MerchantReference = $db->f("order_id");
+
+//making a cancel URL with order id included
+$cancelUrl = "";
+$tempArray =explode('&',payuRedirectPaymentPage_cancelURL);        
+for($i = 0; $i < count($tempArray); $i++) {
+    if(strtolower(substr($tempArray[$i],0,8)) == 'orderid=') {
+        unset($tempArray[$i]);
+    }
+}
+$tempArray[] = "orderid=".$MerchantReference;
+$payuCancelUrl =implode('&',$tempArray);
+
+//making a cancel URL with order id included
+$cancelUrl = "";
+$tempArray =explode('&',payuRedirectPaymentPage_returnURL);        
+for($i = 0; $i < count($tempArray); $i++) {
+    if(strtolower(substr($tempArray[$i],0,8)) == 'orderid=') {
+        unset($tempArray[$i]);
+    }            
+}
+$tempArray[] = "orderid=".$MerchantReference;
+$payuReturnUrl =implode('&',$tempArray);
+
+// Creating Basket Array
+$basketArray = array();
+$basketArray['amountInCents'] = (float) $db->f("order_total") * 100;
+$basketArray['description'] = payuRedirectPaymentPage_defaultOrderNumberPrepend.$MerchantReference;
+$basketArray['currencyCode'] = payuRedirectPaymentPage_selectedCurrency;
+$setTransactionSoapDataArray = array_merge($setTransactionSoapDataArray, array('Basket' => $basketArray ));
+$basketArray = null; unset($basketArray);
+
+// Creating Customer Array
+$customerSubmitArray = array();
+$customerSubmitArray['firstName'] = $user->first_name;
+$customerSubmitArray['lastName'] = $user->last_name;
+$customerSubmitArray['mobile'] = $user->phone_1;
+$customerSubmitArray['email'] = $user->email;
+$setTransactionSoapDataArray = array_merge($setTransactionSoapDataArray, array('Customer' => $customerSubmitArray ));
+$customerSubmitArray = null; unset($customerSubmitArray);
+
+//$customerArray['regionalId'] = ''; - 
+//$customerArray['merchantUserId'] = ''; - dont have a merchant user id here        
+//$setTransactionSoapDataArray = array_merge($setTransactionSoapDataArray, array('Customer' => $customerSubmitArray ));
+//$customerSubmitArray = null; unset($customerSubmitArray);
+
+//Creating Additional Information Array
+$additionalInformationArray = array();
+$additionalInformationArray['supportedPaymentMethods'] = payuRedirectPaymentPage_paymentMethod;
+$additionalInformationArray['cancelUrl'] = $payuCancelUrl;        
+$additionalInformationArray['returnUrl'] = $payuReturnUrl;
+$additionalInformationArray['merchantReference'] = $MerchantReference;
+$setTransactionSoapDataArray = array_merge($setTransactionSoapDataArray, array('AdditionalInformation' => $additionalInformationArray ));
+$additionalInformationArray = null; unset($additionalInformationArray);
+
+//Creating a constructor array for RPP instantiation        
+$constructorArray = array();        
+$constructorArray['safeKey'] = payuRedirectPaymentPage_safekey;
+$constructorArray['username'] = payuRedirectPaymentPage_username;
+$constructorArray['password'] = payuRedirectPaymentPage_password;
+
+//$constructorArray['logEnable'] = false;
+$constructorArray['extendedDebugEnable'] = true;
+
+if(strtolower(payuRedirectPaymentPage_systemToCall) == 'production') {
+    $constructorArray['production'] = true;
+}        
+
+$payuRppConfig['error'] = 'Unable to contact PayU service. Please contact merchant.';
+try {
+    $payuRppInstance = new PayuRedirectPaymentPage($constructorArray);
+    $setTransactionResponse = $payuRppInstance->doSetTransactionSoapCall($setTransactionSoapDataArray);            
+
+    if(isset($setTransactionResponse['redirectPaymentPageUrl'])) {
+        $payuRppConfig['success'] = $setTransactionResponse['redirectPaymentPageUrl'];
+        $message = 'Redirected to PayU for payment'."rn";            
+        $message .= 'PayU Reference: ' . $setTransactionResponse['soapResponse']['payUReference'] . "rn";                
+        $payuTempArray = array();                
+        $payuTempArray['order_id'] = $MerchantReference;
+        $payuTempArray['order_status'] = payuRedirectPaymentPage_preorder_status;                
+        $payuTempArray['include_comment'] = "Y";
+        $payuTempArray['order_comment'] = $message;
+
+        require_once ( CLASSPATH . 'ps_order.php' );
+        $ps_order= new ps_order;
+        $ps_order->order_status_update($payuTempArray);
+
+        vmRedirect($setTransactionResponse['redirectPaymentPageUrl']);            
+        die();
+    }            
+}
+catch(Exception $e) {
+    $payuRppConfig['error'] = $e->getMessage();            
+}
+
+if(isset($payuRppConfig['error'])) {
+    print $payuRppConfig['error'];
+}
+?>
